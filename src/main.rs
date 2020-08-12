@@ -37,8 +37,8 @@ fn has_exceeded_limit(user_id: &String, bucket: &State<Bucket>) -> bool {
     return file_amount >= limit;
 }
 
-#[get("/url/<file_name>")]
-fn request(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
+#[get("/put/<file_name>")]
+fn request_file_upload(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
     if !valid_filename(&*file_name) {
         return Err("Invalid filename".to_string());
     }
@@ -50,12 +50,12 @@ fn request(file_name: String, token: Token, bucket: State<Bucket>) -> Result<Str
     Ok(url)
 }
 
-#[get("/file/<file_name>")]
-fn get_image(file_name: String, token: Token, bucket: State<Bucket>) -> String {
+#[get("/get/<file_name>")]
+fn request_file_download(file_name: String, token: Token, bucket: State<Bucket>) -> String {
     if !valid_filename(&*file_name) {
         return "Invalid filename".to_string()
     }
-    let url = bucket.presign_get(format!("{}", file_name).to_string(), 5).unwrap();
+    let url = get_bucket().presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60).unwrap();
     println!("{}", url);
     url
 }
@@ -85,7 +85,7 @@ fn valid_filename(filename: &str) -> bool {
 fn main() {
     dotenv::dotenv().ok();
     let bucket = get_bucket();
-    rocket::ignite().mount("/", routes![request, get_image, get_limit]).manage(bucket).launch();
+    rocket::ignite().mount("/", routes![request_file_upload, request_file_download, get_limit]).manage(bucket).launch();
 }
 
 fn get_bucket() -> Bucket {
