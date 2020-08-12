@@ -13,7 +13,6 @@ use s3::bucket::Bucket;
 use crate::token::Token;
 use std::env;
 use rocket::State;
-use rocket::response::content::Json;
 
 fn get_file_limit() -> usize {
     let limit: usize = env::var("IMAGE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
@@ -55,7 +54,7 @@ fn request_file_download(file_name: String, token: Token, bucket: State<Bucket>)
     if !valid_filename(&*file_name) {
         return "Invalid filename".to_string()
     }
-    let url = get_bucket().presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60).unwrap();
+    let url = bucket.presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60).unwrap();
     println!("{}", url);
     url
 }
