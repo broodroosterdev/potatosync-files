@@ -77,7 +77,9 @@ fn valid_filename(filename: &str) -> bool {
     filename.chars().all(|c| {
         (c >= 'a' && c <= 'z')
             || (c >= 'A' && c <= 'Z')
-            || (c >= '0' && c <= '9') || c == '.'
+            || (c >= '0' && c <= '9') 
+            || c == '.' 
+            || c == '-'
     })
 }
 
