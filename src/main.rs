@@ -97,5 +97,6 @@ fn get_bucket() -> Bucket {
     let access_key = env::var("S3_ACCESS_KEY").expect("No S3_ACCESS_KEY in .env");
     let secret_key = env::var("S3_SECRET_KEY").expect("No S3_SECRET_KEY in .env");
     let credentials = Credentials::new_blocking(Some(&*access_key), Some(&*secret_key), None, None, None).unwrap();
-    Bucket::new_with_path_style("test", region, credentials).expect("Cant connect to bucket ")
+    let bucket_name = env::var("BUCKET_NAME").expect("No BUCKET_NAME in .env");
+    Bucket::new_with_path_style(bucket_name, region, credentials).expect("Cant connect to bucket ")
 }
