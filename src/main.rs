@@ -15,7 +15,7 @@ use std::env;
 use rocket::State;
 
 fn get_file_limit() -> usize {
-    let limit: usize = env::var("IMAGE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
+    let limit: usize = env::var("FILE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
     limit
 }
 
@@ -59,6 +59,34 @@ fn request_file_download(file_name: String, token: Token, bucket: State<Bucket>)
     url
 }
 
+#[delete("/delete/<file_name>")]
+fn delete_file(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
+    if !valid_filename(&*file_name) {
+        return Err("Invalid filename".to_string())
+    }
+    let result = bucket.delete_object_blocking(format!("/{}/{}", token.sub, file_name).to_string());
+    return match result {
+        Ok(status) => {
+            println!("{}", status.1);
+            match status.1 {
+                204 => {
+                    Ok("DeleteSuccess".to_string())
+                }
+                404 => {
+                    Err("FileNotFound".to_string())
+                }
+                _ => {
+                    Err("Unknown error occurred".to_string())
+                }
+            }
+        },
+        Err(error) => {
+            println!("{}", error.to_string());
+            Err("Unknown error occurred".to_string())
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct UserLimit {
     used: usize,
@@ -72,7 +100,7 @@ fn get_limit(token: Token, bucket: State<Bucket>) -> String {
     }).unwrap()
 }
 
-/// Returns `true` if `id` is a valid paste ID and `false` otherwise.
+/// Returns `true` if `id` is a valid filename and `false` otherwise.
 fn valid_filename(filename: &str) -> bool {
     filename.chars().all(|c| {
         (c >= 'a' && c <= 'z')
@@ -86,7 +114,7 @@ fn valid_filename(filename: &str) -> bool {
 fn main() {
     dotenv::dotenv().ok();
     let bucket = get_bucket();
-    rocket::ignite().mount("/", routes![request_file_upload, request_file_download, get_limit]).manage(bucket).launch();
+    rocket::ignite().mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file]).manage(bucket).launch();
 }
 
 fn get_bucket() -> Bucket {
