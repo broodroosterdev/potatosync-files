@@ -6,6 +6,7 @@ extern crate rocket;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate s3;
+extern crate rocket_cors;
 
 use s3::creds::Credentials;
 use s3::region::Region;
@@ -13,6 +14,7 @@ use s3::bucket::Bucket;
 use crate::token::Token;
 use std::env;
 use rocket::State;
+use rocket_cors::CorsOptions;
 
 fn get_file_limit() -> usize {
     let limit: usize = env::var("FILE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
@@ -114,7 +116,9 @@ fn valid_filename(filename: &str) -> bool {
 fn main() {
     dotenv::dotenv().ok();
     let bucket = get_bucket();
-    rocket::ignite().mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file]).manage(bucket).launch();
+    // Setup CORS
+    let cors = CorsOptions::default().to_cors().unwrap();
+    rocket::ignite().attach(cors).mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file]).manage(bucket).launch();
 }
 
 fn get_bucket() -> Bucket {
