@@ -3,8 +3,9 @@ on:
   push:
 
 jobs:
-  build-amd64:
+  build-and-push-amd64:
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2
       - uses: whoan/docker-build-with-cache-action@v5
@@ -15,8 +16,23 @@ jobs:
           image_name: basmakes/potatosync-files
           image_tag: amd64
           dockerfile: amd64.Dockerfile
-  build-arm:
+  build-amd64:
     runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: whoan/docker-build-with-cache-action@v5
+        name: Build AMD64 Image
+        with:
+          username: basmakes
+          password: "${{ secrets.DOCKER_PASSWORD }}"
+          image_name: basmakes/potatosync-files
+          image_tag: amd64
+          dockerfile: amd64.Dockerfile
+          push_image_and_stages: false
+  build-and-push-arm:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2
       - uses: whoan/docker-build-with-cache-action@v5
@@ -27,4 +43,18 @@ jobs:
           image_name: basmakes/potatosync-files
           image_tag: arm
           dockerfile: arm.Dockerfile
+  build-arm:
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: whoan/docker-build-with-cache-action@v5
+        name: Build ARM Image
+        with:
+          username: basmakes
+          password: "${{ secrets.DOCKER_PASSWORD }}"
+          image_name: basmakes/potatosync-files
+          image_tag: arm
+          dockerfile: arm.Dockerfile
+
 
