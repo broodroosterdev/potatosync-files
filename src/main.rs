@@ -38,6 +38,17 @@ fn has_exceeded_limit(user_id: &String, bucket: &State<Bucket>) -> bool {
     return file_amount >= limit;
 }
 
+/// Returns `true` if `id` is a valid filename and `false` otherwise.
+fn valid_filename(filename: &str) -> bool {
+    filename.chars().all(|c| {
+        (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9')
+            || c == '.'
+            || c == '-'
+    })
+}
+
 #[get("/put/<file_name>")]
 fn request_file_upload(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
     if !valid_filename(&*file_name) {
@@ -94,6 +105,7 @@ struct UserLimit {
     used: usize,
     limit: usize
 }
+
 #[get("/limit")]
 fn get_limit(token: Token, bucket: State<Bucket>) -> String {
     serde_json::to_string(&UserLimit {
@@ -102,23 +114,16 @@ fn get_limit(token: Token, bucket: State<Bucket>) -> String {
     }).unwrap()
 }
 
-/// Returns `true` if `id` is a valid filename and `false` otherwise.
-fn valid_filename(filename: &str) -> bool {
-    filename.chars().all(|c| {
-        (c >= 'a' && c <= 'z')
-            || (c >= 'A' && c <= 'Z')
-            || (c >= '0' && c <= '9') 
-            || c == '.' 
-            || c == '-'
-    })
-}
 
 fn main() {
     dotenv::dotenv().ok();
     let bucket = get_bucket();
     // Setup CORS
     let cors = CorsOptions::default().to_cors().unwrap();
-    rocket::ignite().attach(cors).mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file]).manage(bucket).launch();
+    rocket::ignite()
+        .attach(cors)
+        .mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file])
+        .manage(bucket).launch();
 }
 
 fn get_bucket() -> Bucket {
