@@ -43,7 +43,7 @@ fn request_file_upload(file_name: String, token: Token, bucket: State<Bucket>) -
     if !valid_filename(&*file_name) {
         return Err("Invalid filename".to_string());
     }
-    if has_exceeded_limit(&token.sub, &bucket){
+    if has_exceeded_limit(&token.sub, &bucket) && !file_name.eq("avatar.jpg"){
        return Err("Exceeded limit".to_string());
     }
     let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), 5000).unwrap();
