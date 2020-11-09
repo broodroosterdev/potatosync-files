@@ -52,10 +52,10 @@ fn valid_filename(filename: &str) -> bool {
 #[get("/put/<file_name>")]
 fn request_file_upload(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
     if !valid_filename(&*file_name) {
-        return Err("Invalid filename".to_string());
+        return Err("InvalidFilename".to_string());
     }
     if has_exceeded_limit(&token.sub, &bucket) && !file_name.eq("avatar.jpg"){
-       return Err("Exceeded limit".to_string());
+       return Err("ExceededLimit".to_string());
     }
     let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), 5000).unwrap();
     println!("{}", url);
@@ -65,7 +65,7 @@ fn request_file_upload(file_name: String, token: Token, bucket: State<Bucket>) -
 #[get("/get/<file_name>")]
 fn request_file_download(file_name: String, token: Token, bucket: State<Bucket>) -> String {
     if !valid_filename(&*file_name) {
-        return "Invalid filename".to_string()
+        return "InvalidFilename".to_string()
     }
     let url = bucket.presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60).unwrap();
     println!("{}", url);
@@ -75,7 +75,7 @@ fn request_file_download(file_name: String, token: Token, bucket: State<Bucket>)
 #[delete("/delete/<file_name>")]
 fn delete_file(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
     if !valid_filename(&*file_name) {
-        return Err("Invalid filename".to_string())
+        return Err("InvalidFilename".to_string())
     }
     let result = bucket.delete_object_blocking(format!("/{}/{}", token.sub, file_name).to_string());
     return match result {
@@ -89,13 +89,13 @@ fn delete_file(file_name: String, token: Token, bucket: State<Bucket>) -> Result
                     Err("FileNotFound".to_string())
                 }
                 _ => {
-                    Err("Unknown error occurred".to_string())
+                    Err("UnknownErrorOccurred".to_string())
                 }
             }
         },
         Err(error) => {
             println!("{}", error.to_string());
-            Err("Unknown error occurred".to_string())
+            Err("UnknownErrorOccurred".to_string())
         }
     }
 }
