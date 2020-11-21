@@ -100,6 +100,38 @@ fn delete_file(file_name: String, token: Token, bucket: State<Bucket>) -> Result
     }
 }
 
+#[delete("/delete/all")]
+fn delete_all(token: Token, bucket: State<Bucket>) -> Result<String, String> {
+    let list_result = bucket.list_blocking(format!("/{}/", token.sub), Some(String::from("/"))).expect("Could not get list of files");
+    for (result, code) in list_result{
+        if code != 200 {
+            panic!(format!("list_blocking returned {}", code));
+        }
+        for file in result.contents {
+            let delete_result = bucket.delete_object_blocking(file.key);
+            match delete_result {
+                Ok(status) => {
+                    println!("{}", status.1);
+                    match status.1 {
+                        204 => {}
+                        404 => {
+                            return Err("FileNotFound".to_string())
+                        }
+                        _ => {
+                            return Err("UnknownErrorOccurred".to_string())
+                        }
+                    }
+                },
+                Err(error) => {
+                    println!("{}", error.to_string());
+                    return Err("UnknownErrorOccurred".to_string())
+                }
+            }
+        }
+    }
+    return Ok("DeleteSuccess".to_string());
+}
+
 #[derive(Serialize, Deserialize)]
 struct UserLimit {
     used: usize,
@@ -122,7 +154,7 @@ fn main() {
     let cors = CorsOptions::default().to_cors().unwrap();
     rocket::ignite()
         .attach(cors)
-        .mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file])
+        .mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file, delete_all])
         .manage(bucket).launch();
 }
 
