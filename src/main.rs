@@ -160,7 +160,7 @@ fn main() {
 
 fn get_bucket() -> Bucket {
     let region = Region::Custom{
-        region: "eu-central-1".into(),
+        region: "us-east-1".into(),
         endpoint: env::var("S3_HOST").expect("No S3_HOST specified in .env"),
     };
     let access_key = env::var("S3_ACCESS_KEY").expect("No S3_ACCESS_KEY in .env");
