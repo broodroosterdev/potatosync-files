@@ -22,7 +22,7 @@ fn get_file_limit() -> usize {
 }
 
 fn get_file_amount(user_id: &String, bucket: &State<Bucket>) -> usize {
-    let list_result = bucket.list_blocking(format!("/{}/", user_id), Some(String::from("/"))).expect("Could not get list of files");
+    let list_result = bucket.list_blocking(format!("{}/", user_id), Some(String::from("/"))).expect("Could not get list of files");
     let file_amount: usize = list_result.into_iter().map(|(result, code)| {
         if code != 200 {
             panic!(format!("list_blocking returned {}", code));
