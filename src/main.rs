@@ -1,40 +1,37 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-mod token;
-#[macro_use]
-extern crate rocket;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
 extern crate s3;
-extern crate rocket_cors;
 
+use actix_web::{get, delete, web, App, HttpResponse, HttpServer, Responder};
 use s3::creds::Credentials;
 use s3::region::Region;
 use s3::bucket::Bucket;
-use crate::token::Token;
 use std::env;
-use rocket::State;
-use rocket_cors::CorsOptions;
+
+mod auth;
+
+use crate::auth::Token;
+
 
 fn get_file_limit() -> usize {
     let limit: usize = env::var("FILE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
     limit
 }
 
-fn get_file_amount(user_id: &String, bucket: &State<Bucket>) -> usize {
-    let list_result = bucket.list_blocking(format!("{}/", user_id), Some(String::from("/"))).expect("Could not get list of files");
-    let file_amount: usize = list_result.into_iter().map(|(result, code)| {
-        if code != 200 {
-            panic!(format!("list_blocking returned {}", code));
-        }
+async fn get_file_amount(user_id: &String, bucket: &Bucket) -> usize {
+    let list_result = bucket.list(
+        format!("{}/", user_id),
+        Some(String::from("/"))).await.expect("Could not get list of files");
+    let file_amount: usize = list_result.into_iter().map(|result| {
         result.contents.len()
     }).sum();
     file_amount
 }
 
-fn has_exceeded_limit(user_id: &String, bucket: &State<Bucket>) -> bool {
+async fn has_exceeded_limit(user_id: &String, bucket: &Bucket) -> bool {
     let limit = get_file_limit();
-    let file_amount = get_file_amount(user_id, bucket);
+    let file_amount = get_file_amount(user_id, bucket).await;
     return file_amount >= limit;
 }
 
@@ -49,123 +46,133 @@ fn valid_filename(filename: &str) -> bool {
     })
 }
 
-#[get("/put/<file_name>")]
-fn request_file_upload(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
+#[get("/health")]
+async fn health() -> impl Responder {
+    HttpResponse::Ok().body("Ok")
+}
+
+#[derive(Serialize, Deserialize)]
+struct UserLimit {
+    used: usize,
+    limit: usize,
+}
+
+#[get("/limit")]
+async fn get_limit(bucket: web::Data<Bucket>, token: Token) -> impl Responder {
+    HttpResponse::Ok().json(&UserLimit {
+        used: get_file_amount(&token.sub, bucket.get_ref()).await,
+        limit: get_file_limit(),
+    })
+}
+
+#[get("/put/{file_name}")]
+async fn request_file_upload(web::Path(file_name): web::Path<String>, token: Token, bucket: web::Data<Bucket>) -> impl Responder {
     if !valid_filename(&*file_name) {
-        return Err("InvalidFilename".to_string());
+        return HttpResponse::BadRequest().body("InvalidFilename");
     }
-    if has_exceeded_limit(&token.sub, &bucket) && !file_name.eq("avatar.jpg"){
-       return Err("ExceededLimit".to_string());
+    if !file_name.eq("avatar.jpg") && has_exceeded_limit(&token.sub, &bucket).await {
+        return HttpResponse::BadRequest().body("ExceededLimit");
     }
     let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), 5000).unwrap();
-    println!("{}", url);
-    Ok(url)
+    HttpResponse::Ok().body(url)
 }
 
-#[get("/get/<file_name>")]
-fn request_file_download(file_name: String, token: Token, bucket: State<Bucket>) -> String {
+#[get("/get/{file_name}")]
+async fn request_file_download(web::Path(file_name): web::Path<String>, token: Token, bucket: web::Data<Bucket>) -> impl Responder {
     if !valid_filename(&*file_name) {
-        return "InvalidFilename".to_string()
+        return HttpResponse::BadRequest().body("InvalidFilename");
     }
     let url = bucket.presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60).unwrap();
-    println!("{}", url);
-    url
+    HttpResponse::Ok().body(url)
 }
 
-#[delete("/delete/<file_name>")]
-fn delete_file(file_name: String, token: Token, bucket: State<Bucket>) -> Result<String, String> {
+#[delete("/delete/{file_name}")]
+async fn delete_file(web::Path(file_name): web::Path<String>, token: Token, bucket: web::Data<Bucket>) -> impl Responder {
     if !valid_filename(&*file_name) {
-        return Err("InvalidFilename".to_string())
+        return HttpResponse::BadRequest().body("InvalidFilename");
     }
-    let result = bucket.delete_object_blocking(format!("/{}/{}", token.sub, file_name).to_string());
-    return match result {
+    let result = bucket.delete_object(format!("/{}/{}", token.sub, file_name).to_string()).await;
+    match result {
         Ok(status) => {
             println!("{}", status.1);
-            match status.1 {
+            return match status.1 {
                 204 => {
-                    Ok("DeleteSuccess".to_string())
+                    HttpResponse::Ok().body("DeleteSuccess")
                 }
                 404 => {
-                    Err("FileNotFound".to_string())
+                    HttpResponse::Ok().body("DeleteSuccess")
                 }
                 _ => {
-                    Err("UnknownErrorOccurred".to_string())
+                    HttpResponse::InternalServerError().body("UnknownError")
                 }
             }
-        },
+        }
         Err(error) => {
             println!("{}", error.to_string());
-            Err("UnknownErrorOccurred".to_string())
+            return HttpResponse::InternalServerError().body("UnknownErrorOccurred");
         }
     }
 }
 
 #[delete("/delete/all")]
-fn delete_all(token: Token, bucket: State<Bucket>) -> Result<String, String> {
-    let list_result = bucket.list_blocking(format!("/{}/", token.sub), Some(String::from("/"))).expect("Could not get list of files");
-    for (result, code) in list_result{
-        if code != 200 {
-            panic!(format!("list_blocking returned {}", code));
-        }
+async fn delete_all(token: Token, bucket: web::Data<Bucket>) -> impl Responder {
+    let list_result = bucket.list(format!("/{}/", token.sub), Some(String::from("/"))).await.expect("Could not get list of files");
+    for result in list_result {
         for file in result.contents {
-            let delete_result = bucket.delete_object_blocking(file.key);
+            let delete_result = bucket.delete_object(file.key).await;
             match delete_result {
                 Ok(status) => {
                     println!("{}", status.1);
                     match status.1 {
                         204 => {}
                         404 => {
-                            return Err("FileNotFound".to_string())
+                            return HttpResponse::BadRequest().body("FileNotFound");
                         }
                         _ => {
-                            return Err("UnknownErrorOccurred".to_string())
+                            return HttpResponse::InternalServerError().body("UnknownErrorOccurred");
                         }
                     }
-                },
+                }
                 Err(error) => {
                     println!("{}", error.to_string());
-                    return Err("UnknownErrorOccurred".to_string())
+                    return HttpResponse::InternalServerError().body("UnknownErrorOccurred");
                 }
             }
         }
     }
-    return Ok("DeleteSuccess".to_string());
+    return HttpResponse::Ok().body("DeleteSuccess");
 }
 
-#[derive(Serialize, Deserialize)]
-struct UserLimit {
-    used: usize,
-    limit: usize
-}
-
-#[get("/limit")]
-fn get_limit(token: Token, bucket: State<Bucket>) -> String {
-    serde_json::to_string(&UserLimit {
-        used: get_file_amount( & token.sub, &bucket),
-        limit: get_file_limit()
-    }).unwrap()
-}
-
-
-fn main() {
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
-    let bucket = get_bucket();
-    // Setup CORS
-    let cors = CorsOptions::default().to_cors().unwrap();
-    rocket::ignite()
-        .attach(cors)
-        .mount("/", routes![request_file_upload, request_file_download, get_limit, delete_file, delete_all])
-        .manage(bucket).launch();
+    let bucket = get_bucket().await;
+    HttpServer::new(move || {
+        App::new()
+            .data(bucket.clone())
+            .service(health)
+            .service(get_limit)
+            .service(request_file_upload)
+            .service(request_file_download)
+            .service(delete_file)
+            .service(delete_all)
+    }).bind("127.0.0.1:8000")?
+        .run().await
 }
 
-fn get_bucket() -> Bucket {
-    let region = Region::Custom{
+async fn get_bucket() -> Bucket {
+    let region = Region::Custom {
         region: "us-east-1".into(),
         endpoint: env::var("S3_HOST").expect("No S3_HOST specified in .env"),
     };
     let access_key = env::var("S3_ACCESS_KEY").expect("No S3_ACCESS_KEY in .env");
     let secret_key = env::var("S3_SECRET_KEY").expect("No S3_SECRET_KEY in .env");
-    let credentials = Credentials::new_blocking(Some(&*access_key), Some(&*secret_key), None, None, None).unwrap();
+    let credentials = Credentials::new(
+        Some(&*access_key),
+        Some(&*secret_key),
+        None,
+        None,
+        None).await.unwrap();
     let bucket_name = env::var("BUCKET_NAME").expect("No BUCKET_NAME in .env");
     Bucket::new_with_path_style(&*bucket_name, region, credentials).expect("Cant connect to bucket ")
 }
