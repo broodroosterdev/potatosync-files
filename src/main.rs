@@ -73,7 +73,7 @@ async fn request_file_upload(web::Path(file_name): web::Path<String>, token: Tok
     if !file_name.eq("avatar.jpg") && has_exceeded_limit(&token.sub, &bucket).await {
         return HttpResponse::BadRequest().body("ExceededLimit");
     }
-    let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), 5000).unwrap();
+    let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), 5000, None).unwrap();
     HttpResponse::Ok().body(url)
 }
 
@@ -173,7 +173,7 @@ async fn get_bucket() -> Bucket {
         Some(&*secret_key),
         None,
         None,
-        None).await.unwrap();
+        None).unwrap();
     let bucket_name = env::var("BUCKET_NAME").expect("No BUCKET_NAME in .env");
     Bucket::new_with_path_style(&*bucket_name, region, credentials).expect("Cant connect to bucket ")
 }
