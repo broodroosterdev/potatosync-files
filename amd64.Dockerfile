@@ -1,6 +1,5 @@
 ## Building Stage ##
 FROM messense/rust-musl-cross:x86_64-musl as builder
-RUN rustup default nightly
 RUN rustup target add x86_64-unknown-linux-musl
 WORKDIR /build
 # We'll get to what this file is below!

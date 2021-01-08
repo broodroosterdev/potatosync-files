@@ -1,6 +1,5 @@
 ## Building Stage ##
 FROM messense/rust-musl-cross:armv7-musleabihf as builder
-RUN rustup default nightly
 RUN rustup target add armv7-unknown-linux-musleabihf
 WORKDIR /build
 # We'll get to what this file is below!
