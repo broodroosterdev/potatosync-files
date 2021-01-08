@@ -146,6 +146,7 @@ async fn delete_all(token: Token, bucket: web::Data<Bucket>) -> impl Responder {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
+    let address = env::var("ADDRESS").expect("No ADDRESS specified in .env");
     let bucket = get_bucket().await;
     HttpServer::new(move || {
         App::new()
@@ -156,7 +157,7 @@ async fn main() -> std::io::Result<()> {
             .service(request_file_download)
             .service(delete_file)
             .service(delete_all)
-    }).bind("127.0.0.1:8000")?
+    }).bind(address)?
         .run().await
 }
 
