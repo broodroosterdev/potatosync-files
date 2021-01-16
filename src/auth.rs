@@ -13,7 +13,10 @@ impl FromRequest for Token {
         let _auth = _req.headers().get("Authorization");
         return match _auth {
             Some(_) => {
-                let _split: Vec<&str> = _auth.unwrap().to_str().unwrap().split("Bearer").collect();
+                let auth = _auth.unwrap().to_str().unwrap();
+                println!("{}", auth);
+                let _split: Vec<&str> = auth.split("Bearer ").collect();
+                println!("\"{}\"", _split[1]);
                 let token = _split[1].trim();
                 let secret = env::var("JWT_SECRET").expect("Could not find JWT_SECRET");
                 return match decode::<Token>(

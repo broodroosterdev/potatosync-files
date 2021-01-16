@@ -12,6 +12,8 @@ use std::env;
 mod auth;
 
 use crate::auth::Token;
+use actix_web::http::header;
+use actix_cors::Cors;
 
 
 fn get_file_limit() -> usize {
@@ -82,8 +84,19 @@ async fn request_file_download(web::Path(file_name): web::Path<String>, token: T
     if !valid_filename(&*file_name) {
         return HttpResponse::BadRequest().body("InvalidFilename");
     }
-    let url = bucket.presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60).unwrap();
-    HttpResponse::Ok().body(url)
+    return match bucket.presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60) {
+        Ok(url) => {
+            if url == "" {
+                HttpResponse::NotFound().body("FileNotFound")
+            } else {
+                HttpResponse::Ok().content_type("text/plain").body(url)
+            }
+        },
+        Err(error) => {
+            HttpResponse::InternalServerError().body("InternalServerError")
+        }
+    };
+
 }
 
 #[delete("/delete/{file_name}")]
@@ -149,7 +162,14 @@ async fn main() -> std::io::Result<()> {
     let address = env::var("ADDRESS").expect("No ADDRESS specified in .env");
     let bucket = get_bucket().await;
     HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allowed_methods(vec!["GET", "DELETE"])
+            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+            .allowed_header(header::CONTENT_TYPE)
+            .max_age(3600);
         App::new()
+            .wrap(cors)
             .data(bucket.clone())
             .service(health)
             .service(get_limit)
