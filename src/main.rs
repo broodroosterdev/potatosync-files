@@ -84,19 +84,33 @@ async fn request_file_download(web::Path(file_name): web::Path<String>, token: T
     if !valid_filename(&*file_name) {
         return HttpResponse::BadRequest().body("InvalidFilename");
     }
-    return match bucket.presign_get(format!("/{}/{}", token.sub, file_name).to_string(), 60) {
+    let path = format!("/{}/{}", token.sub, file_name).to_string();
+    match bucket.head_object(path.clone()).await {
+        Ok((_, code)) => {
+            match code {
+                404 => {
+                    return HttpResponse::NotFound().body("FileNotFound");
+                }
+                _ => {}
+            }
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError().body("InternalServerError");
+        }
+    }
+
+    return match bucket.presign_get(path, 60) {
         Ok(url) => {
             if url == "" {
                 HttpResponse::NotFound().body("FileNotFound")
             } else {
                 HttpResponse::Ok().content_type("text/plain").body(url)
             }
-        },
-        Err(error) => {
+        }
+        Err(_) => {
             HttpResponse::InternalServerError().body("InternalServerError")
         }
     };
-
 }
 
 #[delete("/delete/{file_name}")]
@@ -124,7 +138,7 @@ async fn delete_file(web::Path(file_name): web::Path<String>, token: Token, buck
             println!("{}", error.to_string());
             HttpResponse::InternalServerError().body("UnknownErrorOccurred")
         }
-    }
+    };
 }
 
 #[delete("/delete/all")]
