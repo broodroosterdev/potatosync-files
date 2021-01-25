@@ -105,10 +105,10 @@ async fn delete_file(web::Path(file_name): web::Path<String>, token: Token, buck
         return HttpResponse::BadRequest().body("InvalidFilename");
     }
     let result = bucket.delete_object(format!("/{}/{}", token.sub, file_name).to_string()).await;
-    match result {
+    return match result {
         Ok(status) => {
             println!("{}", status.1);
-            return match status.1 {
+            match status.1 {
                 204 => {
                     HttpResponse::Ok().body("DeleteSuccess")
                 }
@@ -122,7 +122,7 @@ async fn delete_file(web::Path(file_name): web::Path<String>, token: Token, buck
         }
         Err(error) => {
             println!("{}", error.to_string());
-            return HttpResponse::InternalServerError().body("UnknownErrorOccurred");
+            HttpResponse::InternalServerError().body("UnknownErrorOccurred")
         }
     }
 }
@@ -175,8 +175,8 @@ async fn main() -> std::io::Result<()> {
             .service(get_limit)
             .service(request_file_upload)
             .service(request_file_download)
-            .service(delete_file)
             .service(delete_all)
+            .service(delete_file)
     }).bind(address)?
         .run().await
 }
