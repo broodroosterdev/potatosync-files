@@ -37,6 +37,14 @@ async fn has_exceeded_limit(user_id: &String, bucket: &Bucket) -> bool {
     return file_amount >= limit;
 }
 
+/// Returns environment variable with specified key as u32
+fn env_int(key: &str) -> Option<u32> {
+    return match env::var(key){
+        Ok(data) => Some(data.parse::<u32>().unwrap()),
+        Err(_) => None,
+    }
+}
+
 /// Returns `true` if `id` is a valid filename and `false` otherwise.
 fn valid_filename(filename: &str) -> bool {
     filename.chars().all(|c| {
@@ -75,7 +83,8 @@ async fn request_file_upload(web::Path(file_name): web::Path<String>, token: Tok
     if !file_name.eq("avatar.jpg") && has_exceeded_limit(&token.sub, &bucket).await {
         return HttpResponse::BadRequest().body("ExceededLimit");
     }
-    let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), 5000, None).unwrap();
+    let duration = env_int("PUT_DURATION");
+    let url = bucket.presign_put(format!("/{}/{}", token.sub, file_name).to_string(), duration.unwrap_or(5000), None).unwrap();
     HttpResponse::Ok().body(url)
 }
 
@@ -98,8 +107,8 @@ async fn request_file_download(web::Path(file_name): web::Path<String>, token: T
             return HttpResponse::InternalServerError().body("InternalServerError");
         }
     }
-
-    return match bucket.presign_get(path, 60) {
+    let duration = env_int("GET_DURATION");
+    return match bucket.presign_get(path, duration.unwrap_or(60)) {
         Ok(url) => {
             if url == "" {
                 HttpResponse::NotFound().body("FileNotFound")
