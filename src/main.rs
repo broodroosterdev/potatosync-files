@@ -180,8 +180,8 @@ async fn main() -> std::io::Result<()> {
             .service(get_limit)
             .service(file_upload)
             .service(file_download)
-            .service(delete_file)
             .service(delete_all)
+            .service(delete_file)
     }).bind(address.clone())?
         .run();
 
