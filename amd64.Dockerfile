@@ -23,7 +23,7 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 ## Running stage ##
 FROM amd64/alpine:3
 EXPOSE 4000
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/potatosync-files /usr/local/bin
 WORKDIR /data
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/potatosync-files .
 ENV ADDRESS=127.0.0.1:4000
-CMD /usr/local/bin/potatosync-files
+CMD ["./potatosync-files"]
