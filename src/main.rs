@@ -25,7 +25,12 @@ fn get_file_limit() -> usize {
 async fn get_file_amount(user_id: &String) -> usize {
     let id = user_id.clone();
     web::block(move || {
-        Ok::<_, std::io::Error>(fs::read_dir(format!("./files/{}", id))?.collect::<Vec<_>>().len())
+        let location = format!("./files/{}", id);
+        let path = Path::new(&location);
+        if !path.is_dir(){
+            fs::create_dir(path)?;
+        }
+        Ok::<_, std::io::Error>(fs::read_dir(path)?.collect::<Vec<_>>().len())
     }).await.unwrap()
 }
 
@@ -44,6 +49,12 @@ fn valid_filename(filename: &str) -> bool {
             || c == '.'
             || c == '-'
     })
+}
+
+async fn file_exists(path: String) -> bool {
+    web::block(move || {
+        Ok::<_, std::io::Error>(Path::new(path.as_str()).exists())
+    }).await.unwrap()
 }
 
 #[get("/health")]
@@ -110,7 +121,16 @@ async fn file_download(web::Path(file_name): web::Path<String>, token: Token) ->
     if !valid_filename(&*file_name) {
         return Err(HttpResponse::BadRequest().body("InvalidFilename").into());
     }
+
     let path = format!("./files/{}/{}", token.sub, file_name).to_string();
+
+    let file_exists = file_exists(path.clone()).await;
+
+    if !file_exists {
+        return Err(HttpResponse::NotFound().body("FileDoesntExist").into());
+    }
+
+
     Ok(NamedFile::open(path)?)
 }
 
@@ -120,19 +140,15 @@ async fn delete_file(web::Path(file_name): web::Path<String>, token: Token) -> H
         return HttpResponse::BadRequest().body("InvalidFilename");
     }
 
-    let account_id = token.sub.clone();
-    let filename = file_name.clone();
+    let path = format!("./files/{}/{}", token.sub, file_name);
 
-    let file_exists = web::block(move || {
-        let path = format!("./files/{}/{}", account_id, filename);
-        Ok::<_, std::io::Error>(Path::new(path.as_str()).exists())
-    }).await.unwrap();
+    let file_exists = file_exists(path.clone()).await;
 
     if !file_exists {
         return HttpResponse::BadRequest().body("FileDoesntExist");
     }
 
-    let path = format!("./files/{}/{}", token.sub, file_name);
+
     if let Err(_) = web::block(move || Ok::<_, std::io::Error>(std::fs::remove_file(path.as_str())?)).await {
         return HttpResponse::InternalServerError().body("Could not delete file")
     }
@@ -170,7 +186,7 @@ async fn main() -> std::io::Result<()> {
     let server = HttpServer::new(move || {
         let cors = Cors::default()
             .allow_any_origin()
-            .allowed_methods(vec!["GET", "DELETE"])
+            .allowed_methods(vec!["GET", "PUT", "DELETE"])
             .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
             .allowed_header(header::CONTENT_TYPE)
             .max_age(3600);
