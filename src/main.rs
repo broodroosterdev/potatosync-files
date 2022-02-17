@@ -2,20 +2,26 @@
 extern crate serde_derive;
 extern crate serde_json;
 
-use actix_web::{get, put, delete, web, App, HttpResponse, HttpServer, Responder};
 use std::{env, fs};
+use std::io::Write;
+use std::path::Path;
+use std::pin::Pin;
+
+use actix_cors::Cors;
+use actix_files::NamedFile;
+use actix_multipart::Multipart;
+use actix_web::{App, delete, Error, get, HttpResponse, HttpServer, put, Responder, web};
+use actix_web::dev::ServiceRequest;
+use actix_web::http::header;
+use actix_web::web::ReqData;
+use actix_web_httpauth::extractors::AuthenticationError;
+use actix_web_httpauth::extractors::bearer::{BearerAuth, Config};
+use actix_web_httpauth::middleware::HttpAuthentication;
+use futures_util::{StreamExt, TryStreamExt};
+
+use crate::auth::Claims;
 
 mod auth;
-
-use crate::auth::Token;
-use actix_web::http::header;
-use actix_cors::Cors;
-use actix_multipart::Multipart;
-use futures_util::{TryStreamExt, StreamExt};
-use std::io::Write;
-use actix_files::NamedFile;
-use std::path::Path;
-
 
 fn get_file_limit() -> usize {
     let limit: usize = env::var("FILE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
@@ -23,11 +29,11 @@ fn get_file_limit() -> usize {
 }
 
 async fn get_file_amount(user_id: &String) -> usize {
-    let id = user_id.clone();
+    let id = user_id.clone() as String;
     web::block(move || {
-        let location = format!("./files/{}", id);
+        let location = format!("./files/{}", &*id);
         let path = Path::new(&location);
-        if !path.is_dir(){
+        if !path.is_dir() {
             fs::create_dir(path)?;
         }
         Ok::<_, std::io::Error>(fs::read_dir(path)?.collect::<Vec<_>>().len())
@@ -69,9 +75,9 @@ struct UserLimit {
 }
 
 #[get("/limit")]
-async fn get_limit(token: Token) -> impl Responder {
+async fn get_limit(claims: Claims) -> impl Responder {
     HttpResponse::Ok().json(&UserLimit {
-        used: get_file_amount(&token.sub).await,
+        used: get_file_amount(&claims.sub.to_string()).await,
         limit: get_file_limit(),
     })
 }
@@ -80,27 +86,27 @@ async fn get_limit(token: Token) -> impl Responder {
 async fn file_upload(
     web::Path(file_name): web::Path<String>,
     mut payload: Multipart,
-    token: Token,
+    claims: Claims,
 ) -> Result<HttpResponse, actix_web::Error> {
     if !valid_filename(&*file_name) {
         return Ok(HttpResponse::BadRequest().body("InvalidFilename"));
     }
 
-    let account_id = token.sub.clone();
+    let account_id = claims.sub.clone();
     web::block(move || {
         let path = format!("./files/{}", account_id);
-        if !Path::new(path.as_str()).exists(){
+        if !Path::new(path.as_str()).exists() {
             std::fs::create_dir(path.as_str())?;
         }
         Ok::<_, std::io::Error>(())
     }).await.unwrap();
 
-    if has_exceeded_limit(&token.sub).await {
+    if has_exceeded_limit(&claims.sub.to_string()).await {
         return Ok(HttpResponse::BadRequest().body("ExceededLimit"));
     }
 
     while let Ok(Some(mut field)) = payload.try_next().await {
-        let filepath = format!("./files/{}/{}", &token.sub, &file_name);
+        let filepath = format!("./files/{}/{}", &claims.sub, &*file_name);
         // File::create is blocking operation, use threadpool
         let mut f = web::block(|| std::fs::File::create(filepath))
             .await
@@ -117,12 +123,12 @@ async fn file_upload(
 }
 
 #[get("/get/{file_name}")]
-async fn file_download(web::Path(file_name): web::Path<String>, token: Token) -> actix_web::Result<NamedFile> {
+async fn file_download(web::Path(file_name): web::Path<String>, claims: Claims) -> actix_web::Result<NamedFile> {
     if !valid_filename(&*file_name) {
         return Err(HttpResponse::BadRequest().body("InvalidFilename").into());
     }
 
-    let path = format!("./files/{}/{}", token.sub, file_name).to_string();
+    let path = format!("./files/{}/{}", claims.sub, file_name).to_string();
 
     let file_exists = file_exists(path.clone()).await;
 
@@ -135,12 +141,12 @@ async fn file_download(web::Path(file_name): web::Path<String>, token: Token) ->
 }
 
 #[delete("/delete/{file_name}")]
-async fn delete_file(web::Path(file_name): web::Path<String>, token: Token) -> HttpResponse {
+async fn delete_file(web::Path(file_name): web::Path<String>, claims: Claims) -> HttpResponse {
     if !valid_filename(&*file_name) {
         return HttpResponse::BadRequest().body("InvalidFilename");
     }
 
-    let path = format!("./files/{}/{}", token.sub, file_name);
+    let path = format!("./files/{}/{}", claims.sub, file_name);
 
     let file_exists = file_exists(path.clone()).await;
 
@@ -150,29 +156,29 @@ async fn delete_file(web::Path(file_name): web::Path<String>, token: Token) -> H
 
 
     if let Err(_) = web::block(move || Ok::<_, std::io::Error>(std::fs::remove_file(path.as_str())?)).await {
-        return HttpResponse::InternalServerError().body("Could not delete file")
+        return HttpResponse::InternalServerError().body("Could not delete file");
     }
 
     HttpResponse::Ok().body("DeleteSuccess")
 }
 
 #[delete("/delete/all")]
-async fn delete_all(token: Token) -> impl Responder {
-    let account_id = token.sub.clone();
+async fn delete_all(claims: Claims) -> impl Responder {
+    let account_id = claims.sub.clone();
 
     let file_exists = web::block(move || {
         let path = format!("./files/{}", account_id);
         Ok::<_, std::io::Error>(Path::new(path.as_str()).exists())
     }).await.unwrap();
 
-    let account_id = token.sub.clone();
+    let account_id = claims.sub.clone();
 
     if file_exists {
         if let Err(_) = web::block(move || {
             let path = format!("./files/{}", account_id);
             Ok::<_, std::io::Error>(std::fs::remove_dir_all(path)?)
         }).await {
-            return HttpResponse::InternalServerError().body("Could not delete all files")
+            return HttpResponse::InternalServerError().body("Could not delete all files");
         }
     }
     return HttpResponse::Ok().body("DeleteAllSuccess");
