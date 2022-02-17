@@ -13,7 +13,7 @@ actix-web = "3"
 actix-cors = "0.5"
 actix-multipart = "0.3"
 actix-files = "0.5"
-reqwest = "0.9.22"
+reqwest = { version = "0.11.9", default-features = false, features = ["rustls-tls", "blocking"] }
 futures-util = "0.3.8"
 serde = "1.0"
 serde_json = "*"

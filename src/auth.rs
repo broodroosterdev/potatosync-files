@@ -67,7 +67,7 @@ fn send_introspection_request(token: &str) -> Option<IntrospectionResponse> {
         return None;
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::blocking::Client::new();
     let response = client.post(&introspection_url)
         .basic_auth(client_id, Some(client_secret))
         .form(&[("token", token)])
