@@ -1,41 +1,25 @@
-use actix_web::{dev, Error, FromRequest, HttpRequest, HttpResponse, ResponseError};
+use actix_web::{dev, Error, FromRequest, HttpRequest};
 use actix_web::error::ErrorUnauthorized;
-use alcoholic_jwt::{JWKS, token_kid, validate, Validation};
-use derive_more::Display;
 use futures_util::future::{err, ok, Ready};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: String,
+use crate::introspect_response::{IntrospectionHeader, IntrospectionResponse};
+
+// Disable warnings
+#[allow(unused_macros)]
+
+// The debug version
+#[cfg(debug_assertions)]
+macro_rules! log {
+    ($( $args:expr ),*) => { println!( $( $args ),* ); }
 }
 
-pub fn validate_token(token: &str) -> Result<bool, ServiceError> {
-    let authority = std::env::var("AUTHORITY").expect("AUTHORITY must be set");
-    let jwks = fetch_jwks(&format!("{}{}", authority.as_str(), "/protocol/openid-connect/certs"))
-        .expect("failed to fetch jwks");
-    let validations = vec![Validation::Issuer(authority), Validation::SubjectPresent];
-    let kid = match token_kid(&token) {
-        Ok(res) => res.expect("failed to decode kid"),
-        Err(_) => return Err(ServiceError::JWKSFetchError),
-    };
-    let jwk = jwks.find(&kid).expect("Specified key not found in set");
-    let res = validate(token, jwk, validations);
-    return if let Err(_e) = res {
-        println!("{:?}", _e);
-        Ok(false)
-    } else {
-        Ok(true)
-    };
+// Non-debug version
+#[cfg(not(debug_assertions))]
+macro_rules! log {
+    ($( $args:expr ),*) => {()}
 }
 
-fn fetch_jwks(uri: &str) -> Result<JWKS, Box<Error>> {
-    let mut res = reqwest::get(uri).expect("Cant make JWKS request");
-    let val = res.json::<JWKS>().expect("Cant deserialize JWKS response");
-    return Ok(val);
-}
-
-impl FromRequest for Claims {
+impl FromRequest for IntrospectionResponse {
     type Error = Error;
     type Future = Ready<Result<Self, Error>>;
     type Config = ();
@@ -48,52 +32,63 @@ impl FromRequest for Claims {
 
         let token = _auth_header.unwrap().to_str().unwrap().trim_start_matches("Bearer ");
 
-        let validation = validate_token(token);
-        if let Err(_e) = validation {
-            return err(ErrorUnauthorized(_e));
+        let introspection_result = send_introspection_request(token);
+        if introspection_result.is_none() {
+            log!("Introspection result is none");
+            return err(ErrorUnauthorized("Invalid token"));
         }
-
-        let token_valid = validation.unwrap();
-        if !token_valid {
-            return err(ErrorUnauthorized("Token invalid"));
-        }
-
-        let splits: Vec<&str> = token.split(".").collect();
-        let encoded_claims = splits[1].trim();
-        let decoded_claims = base64::decode_config(encoded_claims, base64::URL_SAFE_NO_PAD).unwrap();
-
-        let claims: serde_json::Result<Claims> = serde_json::from_slice(&*decoded_claims);
-        if let Err(_e) = claims {
-            return err(ErrorUnauthorized("Token invalid"));
-        }
-
-        return ok(claims.unwrap());
+        let claims = introspection_result.unwrap();
+        return ok(claims);
     }
 }
 
-#[derive(Debug, Display)]
-pub enum ServiceError {
-    #[display(fmt = "Internal Server Error")]
-    InternalServerError,
-
-    #[display(fmt = "BadRequest: {}", _0)]
-    BadRequest(String),
-
-    #[display(fmt = "JWKSFetchError")]
-    JWKSFetchError,
-}
-
-// impl ResponseError trait allows to convert our errors into http responses with appropriate data
-impl ResponseError for ServiceError {
-    fn error_response(&self) -> HttpResponse {
-        match self {
-            ServiceError::InternalServerError => {
-                HttpResponse::InternalServerError().json("Internal Server Error, Please try later")
-            }
-            ServiceError::BadRequest(ref message) => HttpResponse::BadRequest().json(message),
-            ServiceError::JWKSFetchError => {
-                HttpResponse::InternalServerError().json("Could not fetch JWKS")
-            }
-        }
+fn send_introspection_request(token: &str) -> Option<IntrospectionResponse> {
+    let client_id;
+    if let Ok(value) = std::env::var("CLIENT_ID") {
+        client_id = value;
+    } else {
+        eprintln!("Error: CLIENT_ID not set");
+        return None;
     }
+
+    let client_secret;
+    if let Ok(value) = std::env::var("CLIENT_SECRET") {
+        client_secret = value;
+    } else {
+        eprintln!("Error: CLIENT_SECRET not set");
+        return None;
+    }
+
+    let introspection_url;
+    if let Ok(value) = std::env::var("INTROSPECTION_URL") {
+        introspection_url = value;
+    } else {
+        eprintln!("Error: INTROSPECTION_URL not set");
+        return None;
+    }
+
+    let client = reqwest::Client::new();
+    let response = client.post(&introspection_url)
+        .basic_auth(client_id, Some(client_secret))
+        .form(&[("token", token)])
+        .send();
+
+    if response.is_err() {
+        eprintln!("Error: Introspection request returned error: {}", response.err().unwrap());
+        return None;
+    }
+
+    let text: String = response.unwrap().text().unwrap();
+    let header: IntrospectionHeader = serde_json::from_str(&text).unwrap();
+
+    if !header.active {
+        log!("Introspection result is not active");
+        return None;
+    }
+    let json = serde_json::from_str::<IntrospectionResponse>(&text);
+    if let Err(ref error) = json {
+        eprintln!("Error: Unable to parse introspection response: {}", error);
+        return None;
+    }
+    return Some(json.unwrap());
 }

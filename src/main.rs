@@ -5,23 +5,20 @@ extern crate serde_json;
 use std::{env, fs};
 use std::io::Write;
 use std::path::Path;
-use std::pin::Pin;
 
 use actix_cors::Cors;
 use actix_files::NamedFile;
 use actix_multipart::Multipart;
-use actix_web::{App, delete, Error, get, HttpResponse, HttpServer, put, Responder, web};
-use actix_web::dev::ServiceRequest;
+use actix_web::{App, delete, get, HttpResponse, HttpServer, put, Responder, web};
 use actix_web::http::header;
-use actix_web::web::ReqData;
-use actix_web_httpauth::extractors::AuthenticationError;
-use actix_web_httpauth::extractors::bearer::{BearerAuth, Config};
-use actix_web_httpauth::middleware::HttpAuthentication;
 use futures_util::{StreamExt, TryStreamExt};
 
-use crate::auth::Claims;
+use crate::introspect_response::IntrospectionResponse;
 
 mod auth;
+mod introspect_response;
+
+type Claims = IntrospectionResponse;
 
 fn get_file_limit() -> usize {
     let limit: usize = env::var("FILE_LIMIT").expect("No FILE_LIMIT in .env").parse().expect("FILE_LIMIT is not a number");
@@ -136,7 +133,6 @@ async fn file_download(web::Path(file_name): web::Path<String>, claims: Claims) 
         return Err(HttpResponse::NotFound().body("FileDoesntExist").into());
     }
 
-
     Ok(NamedFile::open(path)?)
 }
 
@@ -153,7 +149,6 @@ async fn delete_file(web::Path(file_name): web::Path<String>, claims: Claims) ->
     if !file_exists {
         return HttpResponse::BadRequest().body("FileDoesntExist");
     }
-
 
     if let Err(_) = web::block(move || Ok::<_, std::io::Error>(std::fs::remove_file(path.as_str())?)).await {
         return HttpResponse::InternalServerError().body("Could not delete file");
